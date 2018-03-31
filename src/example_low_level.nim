@@ -9,7 +9,7 @@ import tables
 echo("librdkafka version: " & $rd_kafka_version_str())
 
 let brokers = "localhost:9092"
-let topic_name = "my.test.topic.1"
+let topic_name = "my.test.topic"
 let timeout_ms: cint = 10000
 
 
@@ -144,6 +144,10 @@ proc produce() =
 
   # create topic
   let topic = rd_kafka_topic_new(kp, topic_name, topic_conf)
+  if isNil(kp):
+    echo "Failed to attach to topic"
+    echo($errstr)
+    quit(1)
  
   let key: cstring = nil
   let keylen = 0
@@ -166,6 +170,7 @@ proc produce() =
   echo("Flushing producer queue")
   discard rd_kafka_flush(kp, timeout_ms)
 
+  echo("Destory producer queue")
   destroy_kafka(kp)
 
  
@@ -228,12 +233,6 @@ proc consume() =
   var partitions = rd_kafka_topic_partition_list_new(num_partitions)
   discard rd_kafka_topic_partition_list_add(partitions, topic_name, partition)
 
-  #err = rd_kafka_committed(kc, partitions, 10000)
-  #if err != rd_kafka_resp_err_t.RD_KAFKA_RESP_ERR_NO_ERROR:
-  #  echo "Could not fetch offsets from broker"
-  #  echo $rd_kafka_err2str(err)
-  #  quit(1)
-
   echo("Subscribing")
   var err = rd_kafka_subscribe(kc, partitions)
   if err != rd_kafka_resp_err_t.RD_KAFKA_RESP_ERR_NO_ERROR:
@@ -242,10 +241,9 @@ proc consume() =
     echo($rd_kafka_err2str(err))
     quit(1)
 
-  # grab a single message
+  echo("Grabbing a single message in order to trigger the assignment")
   var message = rd_kafka_consumer_poll(kc, timeout_ms)
 
-  # what is our assignment? (MUST previously poll once because assignment is lazy)
   echo("Grabbing partition assignment")
   err = rd_kafka_assignment(kc, addr partitions)
   if err != rd_kafka_resp_err_t.RD_KAFKA_RESP_ERR_NO_ERROR:
@@ -256,6 +254,14 @@ proc consume() =
   if partitions.cnt == 0:
     echo("Assigned no partitions, so exiting")
     quit(1)    
+
+  echo("Fetching committed offsets")
+  err = rd_kafka_committed(kc, partitions, timeout_ms)
+  if err != rd_kafka_resp_err_t.RD_KAFKA_RESP_ERR_NO_ERROR:
+    echo "Could not fetch offsets from broker"
+    echo $rd_kafka_err2str(err)
+    quit(1)
+  print_partitions(partitions)
 
   # see where we are
   print_watermarks_and_positions(kc, partitions)
